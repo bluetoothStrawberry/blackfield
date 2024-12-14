@@ -6,7 +6,7 @@
 
 ### 100.1 Fingerprinting
 
-Here we can everything we could do before the engagement . Usually `passive` but here I'm interact directly with the box because it's `hackTheBox`.
+Here we can everything we could do before the engagement . Usually `passive` but here I'm already interacting  directly with the box because it's `hackTheBox`.
 
 ```sh
 ping -c1 10.10.10.192
@@ -92,7 +92,7 @@ sudo timedatectl set-ntp false
 sudo timedatectl set-timezone GMT
 ```
 
-Now let's adjust our clock it manually. 
+Now let's adjust our clock manually. 
 ```sh
 sudo timedatectl set-time '2024-12-14 05:37'
 ```
@@ -105,7 +105,7 @@ sudo timedatectl set-time '2024-12-14 05:37'
 
 ### 400.1 Null Session Enumeration
 
-> Should I expect finding a situation like this in a real engagement ?
+> Should I expect finding something like this in a real engagement ?
 
 ```sh
 nxc smb -u 'guest' -p '' --shares dc01
@@ -210,7 +210,7 @@ As you can see we get the same results because it's the same method!
 
 Although we have over 300 accounts. Only 4 do not fallow the naming pattern. 
 
-This is common in many companies. Instead of using something like `michell.mayers`they will use a nominal system that will look like `<some arbritrary prefix> `+ `<some random number> `. Is this real security or is this attempt security through obscurity ?
+This is common in many companies. Instead of using something like `michell.mayers`they will use a nominal system that will look like `<some arbritrary prefix> `+ `<some random number> `. Is this real security or is this attempted security through obscurity ?
 
 | Interesting Accounts |
 | -------------------- |
@@ -318,7 +318,7 @@ So the plan is:
 ###### Abusing `PasswordForceChange`
 
 
-We can do change the user password using `rpcclient`.
+We can change the user password using `rpcclient`.
 
 ```sh
 rpcclient -U 'support'%'#00^BlackKnight' dc01
@@ -359,6 +359,8 @@ https://attack.mitre.org/techniques/T1003/001/
 
 ![](images/mitre.png)
 
+
+
 We don't even need the plain text credential. Retrieving a  `nt` hash for `svc_backup`or `administrator`would suffice. 
 
 ```sh
@@ -367,6 +369,7 @@ smbget -U 'BLACKFIELD/audit2020'%'#00^BlackKnight' \
 ```
 ![](images/exfiltrated.png)
 
+Let's hop on my `commando box`. 
 
 We need to run `mimikatz.exe`  x64 as administrator to dump the credentials from  the process dump.
 
@@ -406,12 +409,14 @@ nxc winrm -u 'svc_backup' \
 > how does that work under the hood? 
 
 
-Also we've learned something new from the experience and this [article](https://www.semperis.com/blog/how-to-defend-against-pass-the-hash-attack/). Here they are teaching how to defend but it also teaches us how to avoid detection! Security analysts may dump memory for process often.  So It's all about behavior! At least now we know  that there's no need for uploading tools . We can dump process and or hives and extract those hashes on our system without touching disk. 
+Also we've learned something new from the experience and this [article](https://www.semperis.com/blog/how-to-defend-against-pass-the-hash-attack/). Here they are teaching how to defend but it also teaches us how to avoid detection! 
+
+Security analysts may dump memory for process often.  So It's all about behavior! At least now we know  that there's no need for uploading tools . We can dump process and or hives and extract those hashes on our system without touching disk. 
 
 https://www.semperis.com/blog/how-to-defend-against-pass-the-hash-attack/
 ![](images/fair.png)
 
-If someone sees an `IT Guy` running `procdump`would that be alarming ? 
+If someone catches an `IT Guy` running `procdump`would that be alarming ? 
 
 
 ---
@@ -436,24 +441,24 @@ whoami /priv
 ```
 ![](images/privs.png)
 
-Cool both `Backup`and `Restore` privileges are available and enabled!
+Cool! both `Backup`and `Restore` privileges are available and enabled!
 
 We can leverage our `privs` `SeBackup`and `SeRestore`to steal the database that stores domain credentials `ntds.dit`.
 
 First wen need to create a shadow copy of the `c:\`drive. Because we cannot open the `NTDS.dit`database while it is in use!
 
-Well, defender is indeed doing it's thing.
+Well, defender is doing it's thing.
 ```powershell
 Get-Process -Name MsMpEng
 ```
 ![](images/defender.png)
 
-It's better if we do not do anything wild here. 
+We better restrain ourselves from doing anything wild here. 
 
-By the way, Now I understand why that `/profile`share looked funky.
+By the way. Now I understand why that `/profile`share looked funky.
 They changed the accounts names to be nominal. 
-After the `support` account was give some access over `auditor2020`to disable the account.
-And that's why we have some control over the object! 
+Then the  `support` account was given control over `auditor2020`to disable it.
+And that's why we were able to change the password! 
 Also they created a `svc_backup`to backup and restore the system after the changes. Hence, `svc_backup`was operating in the `DC01$` while the auditors were working. And that's why we got  the account `ntlm`hash  from  `lsass.exe`. A perfect `chain of misfortunes` ! 
 
 ![](images/context.png)
@@ -499,7 +504,7 @@ python3 secretsdump.py -ntds ntds.dit -system system -sam sam LOCAL
 ```
 ![](images/dsync.png)
 
-Perfect! Now time to `Pass-The-Hash`.
+Perfect! Time to `Pass-The-Hash`.
 
  We could get a session as the administrator with: 
 ```sh
