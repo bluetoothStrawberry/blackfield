@@ -82,7 +82,7 @@ Also Our clock is off! We'll need to go back to `resource development`to fix tha
 
 ### 200.2 Resource Development : Fixing Clock Skew 
 
-> If we don't fix our clock we won't be able to authenticate if we compromise an account! 
+> If we don't fix our clock we won't be able to authenticate if we ever compromise an account! 
 
 ```sh
 sudo timedatectl set-ntp false
@@ -388,7 +388,7 @@ svc_backup: 9658d1d1dcd9250115e2205d9f48400d
 administrator: 7f1e4ff8c6a8e6b6fcae2d9c0572cd62
 ```
 
-It looks like they changed the administrator after the breach!
+It looks like they changed the administrator password after the breach!
 
 However we successfully compromised `svc_backup`as planned! 
 ```sh
@@ -399,8 +399,11 @@ nxc winrm -u 'svc_backup' \
 ```
 ![](images/worked.png)
 
-> [!NOTE] About Pass-The-Hash Attacks
-> If we can take over account only knowing it's hash is there anything like encryption really on windows ?  We may not know the password but the effect is the same! we can just reuse the found hash everywhere!  And windows we'll accept it ! how does that work under the hood? 
+> **About Pass-The-Hash Attacks**
+> 
+> How to protect a system knowing that the attacker don't even need to crack the hashes ? 
+> We may not know the password but the effect is the same! 
+> how does that work under the hood? 
 
 
 Also we've learned something new from the experience and this [article](https://www.semperis.com/blog/how-to-defend-against-pass-the-hash-attack/). Here they are teaching how to defend but it also teaches us how to avoid detection! Security analysts may dump memory for process often.  So It's all about behavior! At least now we know  that there's no need for uploading tools . We can dump process and or hives and extract those hashes on our system without touching disk. 
@@ -447,17 +450,24 @@ Get-Process -Name MsMpEng
 
 It's better if we do not do anything wild here. 
 
+By the way, Now I understand why that `/profile`share looked funky.
+They changed the accounts names to be nominal. 
+After the `support` account was give some access over `auditor2020`to disable the account.
+And that's why we have some control over the object! 
+Also they created a `svc_backup`to backup and restore the system after the changes. Hence, `svc_backup`was operating in the `DC01$` while the auditors were working. And that's why we got  the account `ntlm`hash  from  `lsass.exe`. A perfect `chain of misfortunes` ! 
 
-https://medium.com/r3d-buck3t/windows-privesc-with-sebackupprivilege-65d2cd1eb960
+![](images/context.png)
+
+Back to work! I'll use this [article](https://medium.com/r3d-buck3t/windows-privesc-with-sebackupprivilege-65d2cd1eb960) !
 
 `wbadmin` is the backup utility on windows and we are the `backup operators` hehe
 
 So let's use the `native tool`to backup `c:\windows\ntds` then we could just *copy/restore* `ntds.dit` from the backup and use it to dump domain hashes! 
 
-We could've done this slightly better! Even though this won't  trigger `Windows Defender`we still touching disk. Instead I could've create a `smb share`on my `kali`to copy these files directly! 
+We could've done this slightly better! Even though this won't  trigger `Windows Defender`we still touching disk. Instead I could've created a `smb share`on my `kali`to copy these files directly! 
 
 ```
-wbadmin start backup -quiet -backuptarget:\\dc01\c$\loot  -include:c:\windows\ntd
+wbadmin start backup -quiet -backuptarget:\\dc01\c$\loot -include:c:\windows\ntds
 ```
 ![](images/perfect.png)
 
