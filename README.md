@@ -6,7 +6,7 @@
 
 ### 100.1 Fingerprinting
 
-Here we can everything we could do before the engagement . Usually `passive` but here I'm already interacting  directly with the box because it's `hackTheBox`.
+This step is crucial to gather as much intel on the target as possible before the engagement . Usually  it's only `passive` but here I'm already interacting  directly with the box because it's `hackTheBox`.
 
 ```sh
 ping -c1 10.10.10.192
